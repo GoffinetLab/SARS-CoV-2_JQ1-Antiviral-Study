@@ -10,4 +10,8 @@ This is the GitHub repository for the manuscript "Pharmacological inhibition of 
 
 Unix/BASH and R scripts are deposited in a directory structure that reflects the different compartments of the analysis. Code used for the initial alignment of raw reads to the reference genome and counting of gene features is deposited in the folder "0_ReferenceAlignment_FeatureCount". Preprocessing of the resulting count matrix is included in the folder "1_Preprocessing" and further downstream analyses are included in the folder "2_FurtherAnalyses".
 
+## REFERENCE GENOME
+
+The analysis for the RNAseq reads was performed by aligning the reads to a combined human/SARS-CoV-2 genome. To create this reference, the SARS-CoV-2 genome (GenBank entry MN908947) was appended to the human genome assembly h38 (ENSEMBL v102), i.e. both the FASTA and GTF files were merged. The SARS-CoV-2 FASTA and GTF files are included in the folder "0_ReferenceAlignment_FeatureCount". 
+
 For further information, please refer to the manuscript itself.
