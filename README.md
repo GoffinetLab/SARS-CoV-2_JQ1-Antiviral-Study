@@ -6,7 +6,7 @@ Inhibitors of bromodomain and extra-terminal proteins (iBETs), including JQ-1, h
 
 ## OVERVIEW
 
-This is the GitHub repository for the manuscript "Pharmacological inhibition of bromodomain and extra-terminal proteins induces NRF-2-mediated inhibition of SARS-CoV-2 replication and is subject to viral antagonism" by Mhlekude _et al._, 2023. The code utilised for the analysis of the RNAseq data is deposited here. 
+This is the GitHub repository for the manuscript "Pharmacological inhibition of bromodomain and extra-terminal proteins induces NRF-2-mediated inhibition of SARS-CoV-2 replication and is subject to viral antagonism" by Mhlekude _et al._, 2023. The code utilised for the analysis of the RNAseq and ATACseq data is deposited here. 
 
 Unix/BASH and R scripts are deposited in a directory structure that reflects the different compartments of the analysis. Code used for the initial alignment of raw reads to the reference genome and counting of gene features is deposited in the folder "0_ReferenceAlignment_FeatureCount". Preprocessing of the resulting count matrix is included in the folder "1_Preprocessing" and further downstream analyses are included in the folder "2_FurtherAnalyses".
 
