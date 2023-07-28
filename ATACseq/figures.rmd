@@ -1,0 +1,743 @@
+---
+title: "Figures for manuscript - ATAC-Seq"
+author: ""
+date: "`r Sys.Date()`"
+nooutput: word_document
+output: html_document
+---
+
+```{r,echo=FALSE}
+## Set default options for the knitr RMD processing
+knitr::opts_chunk$set(echo=FALSE,warning=FALSE,message=FALSE,fig.width=5,fig.height=5,cache=TRUE,autodep=TRUE, results="hide")
+```
+
+
+
+
+```{r}
+## note:
+## to install Rseasnap, run devtools::install_github("bihealth/Rseasnap")
+library(tmod)
+library(tidyverse)
+library(colorDF)
+library(Rseasnap)
+library(tmod)
+library(readxl)
+library(DESeq2)
+library(pheatmap)
+library(ggrepel)
+library(cowplot)
+library(DOSE)
+library(enrichplot)
+library(clusterProfiler)
+library(msigdbr)
+```
+
+```{r color_palette}
+col_yl <- "#F39D00"
+col_gr <- "#208420"
+col_vl <- "#981EE5"
+
+
+col_autophagy <- "#0000FF"
+col_nrf2      <- "#FFA500"
+col_isg       <- "#FF0000"
+col_cellcyc   <- "forestgreen"
+```
+
+```{r loading pipeline,eval=TRUE}
+pip <- load_de_pipeline("../2020-12-15-Laqmani-Postmus-ATAC_Seq/dbinding_2021_01_23/DE_config.yaml")
+annot <- get_annot(pip)
+res <- get_contrasts(pip)
+tmod_res <- get_tmod_res(pip)
+tmod_dbs <- get_tmod_dbs(pip)
+tmod_map <- get_tmod_mapping(pip)
+ds <- get_deseq2(pip)
+covar <- get_covariates(pip)
+```
+
+
+```{r define_nrf2_reg}
+nrf2_reg <- c("GSR", "TUBA4A", "OSGIN1", "HMOX1", "GCLM",
+                 "KEAP1", "PSMC5", "ITPKC", "GADD45C", "TNXB",
+                 "MTHFR", "MAFG", "TUBA1C", "FTL", "TNXB",
+                 "NQO1", "FOS", "NRF1", "PRDX1", "MAFF", "NOTCH4",
+                 "GCLC", "EPHX1", "GSTP1", "TXNRD1", "SQSTM1",
+                 "ALDH3A1", "CYP1A1", "EPHX1", "GSTP1", "TXNRD1", "TXNRD3",
+                 "GSS", "GSTA1", "PPARG", "GPX3", "PSMD2", "GADD45B",
+                 "EGR1", "ENO1", "HMOX2")
+
+
+```
+
+
+
+
+
+**Fig.** Fragment size distribution for a representative sample. Left,
+distribution of the fragment size lengths; right, autocorrelation
+coefficient showing the expected periodicity.
+
+![](fragment_size_distr.png)
+
+
+**Fig.** Heatmap showing correlation matrix between peaks.
+
+![](peak_correlation.png)
+
+**Fig.** Distribution of the TSS. Plot showing the distance from TSS against
+the read density.
+
+
+```{r dtss_plot, fig.width=5,fig.height=4.5}
+df <- annot %>% filter(abs(distanceToTSS) < 10000)
+ggplot(df, aes(x=distanceToTSS)) + geom_density() + xlim(-500, 500)
+dev.copy2pdf(file="distribution_all_peaks.pdf")
+```
+
+
+
+
+**Fig.** Chromatin feature analysis showing the peak distribution across the
+chromatin.
+
+![](peak_features.png)
+
+**Fig.** Occupancy heatmap for peaks corresponding to selected genes (read
+from file `genesets_allgenes.csv`)
+
+```{r,fig.width=8,fig.height=14}
+vst_dds <- vst(ds)
+
+
+mat <- assay(vst_dds)
+expr_df <- mat %>%
+    as.data.frame() %>%
+    rownames_to_column("PrimaryID") %>%
+    pivot_longer(-PrimaryID) %>%
+    left_join(covar %>% select(label, treatment, group), by=c(name="label")) %>%
+    left_join(annot %>% select(PrimaryID, annotation, SYMBOL, ENSEMBL), by="PrimaryID")
+
+
+all_genesets_genes <- read.csv("genesets_allgenes.csv")
+all_genesets_genes <- rbind(all_genesets_genes, 
+                            data.frame(gene=nrf2_reg, pway="nrf2_reg"))
+colors <- colorRampPalette(c("#0000FF", "#FFFF00"))(30)
+
+allgs_mat <- mat %>% 
+  as.data.frame() %>%
+  rownames_to_column("PrimaryID") %>%
+  mutate(gene = annot$SYMBOL[ match(PrimaryID, annot$PrimaryID) ]) %>%
+  mutate(gene_set=all_genesets_genes$pway[ match(gene, all_genesets_genes$gene) ]) %>%
+  filter(gene %in% all_genesets_genes$gene) %>%
+  arrange(gene_set)
+rownames(allgs_mat) <- allgs_mat$PrimaryID
+
+allgs_mat2 <- map_dfr(unique(allgs_mat$gene_set), ~ {
+  gs <- .
+  .mat <- allgs_mat %>% dplyr::filter(gene_set == gs)
+  ord <- hclust(dist(as.matrix(.mat %>% dplyr::select(-PrimaryID, -gene, -gene_set))))$order
+  .mat[ord, ]
+})
+
+colnames(allgs_mat2) <- gsub("^([0-9]*)_(.*)$", "\\2 \\1", colnames(allgs_mat2))
+labels_row <- ifelse(allgs_mat2$gene == "NFE2L2", "NRF2", "")
+
+annotation_col <- data.frame(ID=allgs_mat2 %>% dplyr::select(-PrimaryID, -gene,
+                                               -gene_set) %>%
+  colnames()) %>%
+  mutate(Treatment = ifelse(grepl("DMSO", ID), "DMSO", 
+                            ifelse(grepl("JQ-1", ID), "JQ-1", "naive"))) %>%
+  mutate(Treatment = factor(Treatment, levels = c("naive", "DMSO", "JQ-1"))) %>%
+  mutate(Group = ifelse(grepl("uninfected", ID), "uninfected", "infected")) %>%
+  mutate(Group = factor(Group, levels = c("uninfected", "infected"))) %>%
+  arrange(Treatment, Group)
+
+rownames(annotation_col) <- annotation_col$ID
+annotation_col$ID  <- NULL
+
+
+allgs_mat2 <- allgs_mat2 %>% 
+  mutate(gene_set = gsub("kegg_autophagy_animal", "Autophagy (KEGG)",
+                         gsub("reactome_ifn_signalling", "IFN signalling (REACTOME)",
+                              gsub("reactome_cellcycle", "Cell cycle (REACTOME)",
+                                   gsub("nrf2_reg", "NRF2 regulated genes",
+                                        gene_set)))))
+
+
+annotation_colors <- list(gene_set=c("Autophagy (KEGG)"=col_autophagy,
+                                     "IFN signalling (REACTOME)"=col_isg,
+                                     "Cell cycle (REACTOME)"=col_cellcyc,
+                                     "NRF2 regulated genes"=col_nrf2),
+                          Treatment=c(naive="grey", DMSO="blue", "JQ-1"="red"),
+                          Group=c(uninfected="blue", infected="red"))
+
+x <- pheatmap(allgs_mat2 %>% dplyr::select(all_of(rownames(annotation_col))), 
+              annotation_col = annotation_col,
+              annotation_row = allgs_mat2 %>% select(gene_set),
+              annotation_colors = annotation_colors,
+              labels_row = allgs_mat2$gene ,
+              cluster_rows = F, treeheight_row=0, 
+              cluster_cols = F,
+              color = colors, show_rownames = FALSE, scale = "row")
+ggsave("ATACseq_heatmap_allGenesets_allcontrasts.pdf", plot = x, width = 8, height = 15)
+x
+
+```
+
+**Fig.** Occupancy heatmap for peaks corresponding to top 30 differentially
+binding peaks from each contrast.
+
+```{r,fig.width=6,fig.height=12}
+vst_dds <- vst(ds)
+
+
+mat <- assay(vst_dds)
+
+colors <- colorRampPalette(c("#0000FF", "#FFFF00"))(30)
+
+res %>% map(as.data.frame) %>% 
+  imap_dfr(~ { .x %>% rownames_to_column("PrimaryID") %>% mutate(contrast=.y) })
+
+sel_genes <- map(res, ~ {
+                   .x %>% 
+                     rownames_to_column("PrimaryID") %>%
+                     arrange(padj) %>%
+                     dplyr::slice(1:30) %>%
+                     pull(PrimaryID) }) %>% unlist() %>% unique()
+
+allgs_mat <- mat %>% 
+  as.data.frame() %>%
+  rownames_to_column("PrimaryID") %>%
+  filter(PrimaryID %in% sel_genes) %>%
+  dplyr::select(-PrimaryID)
+
+x <- pheatmap(allgs_mat, cluster_rows = T, color = colors, 
+              show_rownames = F, scale = "row", treeheight_row=0)
+ggsave("ATACseq_heatmap_top30genes_allcontrasts.pdf", plot = x, width = 8, height = 15)
+x
+
+```
+
+
+
+
+
+
+**Fig.** Volcano plots showing peak fold changes (x axis9 and p-values (y
+axis).
+
+
+```{r fig.width=8,fig.height=12}
+
+contrast_labs <- c(
+"uni_DMSO_vs_naive_ID0" = "DMSO uninfected vs naive",
+"JQ_uninf_vs_naive_ID2" = "JQ uninfected vs naive",
+"DMSO_inf_vs_uninf_ID1" = "DMSO infected vs DMSO uninfected",
+"JQ_inf_vs_uninf_ID3"   = "JQ infected vs JQ uninfected",
+"JQ_uninf_vs_DMSO_uninf_ID5" = "JQ uninfected vs DMSO uninfected",
+"JQ_inf_vs_DMSO_inf_ID6" = "JQ infected vs DMSO infected",
+"interaction_ID4"       = "Interaction between treatment and infection"
+                   )
+
+
+all_res.df <- imap_dfr(res, ~ { .x %>% rownames_to_column("PrimaryID") %>% mutate(contrast = .y)}) %>%
+  mutate(Significant = ifelse(padj > .05 | abs(log2FoldChange) < 1,
+                              "NS", ifelse(log2FoldChange > 0, "UP", "DOWN"))) %>%
+  mutate(label=factor(contrast_labs[ contrast ], levels=contrast_labs)) %>%
+  mutate(gene=annot$SYMBOL[ match(PrimaryID, annot$PrimaryID) ])
+
+volc <- ggplot(all_res.df, aes(x = log2FoldChange, y = -log10(padj), color = Significant)) + 
+  geom_point() + 
+  scale_color_manual(values = c(NS = "darkgrey", UP = "#FFFF00", DOWN = "#0000FF")) +
+  xlim(-10, 10) + 
+  theme_bw() + 
+  ylab("-log(padj)") + 
+  facet_wrap(~label, ncol=2 )
+
+ggsave("ATACseq_volcplots_allcontrasts.pdf", plot = volc, width = 8, height = 12)
+volc
+```
+
+
+**Fig.** Volcano plots showing peak fold changes (x axis9 and p-values (y
+axis). Colors correspond to peaks associated with genes from the ISG gene set.
+
+
+```{r fig.width=8,fig.height=12}
+isg <- read_excel("interferon_signalling.xlsx")[[1]]
+
+all_res.df <- all_res.df %>%
+  mutate(ISG = ifelse(gene %in% isg,
+                      ifelse(Significant != "NS", "ISG_significant", "ISG_NS"),
+                      "NS")) %>%
+  mutate(ISG=factor(ISG, levels=c("NS", "ISG_NS", "ISG_significant"))) %>%
+  mutate(isg_label=ifelse(ISG == "ISG_significant", gene, NA)) %>%
+  arrange(ISG)
+
+volc <- ggplot(all_res.df, aes(x = log2FoldChange, y = -log10(padj), 
+                               label=isg_label,
+                               color = ISG)) + 
+  geom_point() + 
+  geom_text_repel(color="black", size=3) +
+  scale_color_manual(values = c(NS = "lightgrey", ISG_NS="darkgrey", ISG_significant=col_vl)) +
+  xlim(-10, 10) + 
+  theme_bw() + 
+  ylab("-log(padj)") + 
+  facet_wrap(~label, ncol=2 )
+
+ggsave("ATACseq_volcplots_allcontrasts_nrf1.pdf", plot = volc, width = 8, height = 12)
+volc
+
+```
+
+
+
+```{r fig.width=8,fig.height=12}
+
+all_res_nrf2 <- all_res.df %>%
+  mutate(NRF2 = ifelse(gene %in% nrf2_reg,
+                      ifelse(Significant != "NS", "NRF2_reg_significant", "NRF2_reg_NS"),
+                      "NS")) %>%
+  mutate(NRF2 = ifelse(is.na(NRF2), "NS", NRF2)) %>%
+  mutate(NRF2 = ifelse(!is.na(gene) & gene == "NFE2L2", "NRF2", NRF2)) %>%
+  mutate(NRF2 = factor(NRF2, levels=c("NS", "NRF2_reg_NS", "NRF2",
+                                  "NRF2_reg_significant"))) %>%
+  mutate(isg_label=ifelse(NRF2 == "NRF2_reg_significant", gene, NA)) %>%
+  arrange(NRF2)
+
+volc <- ggplot(all_res_nrf2, aes(x = log2FoldChange, y = -log10(padj), 
+                               label=isg_label,
+                               color = NRF2)) + 
+  geom_point() + 
+  geom_text_repel(color="black", size=3) +
+  scale_color_manual(values = c(NS = "lightgrey", NRF2_reg_NS="darkgrey", NRF2=col_yl, 
+                                NRF2_reg_significant="red")) +
+  xlim(-10, 10) + 
+  theme_bw() + 
+  ylab("-log(padj)") + 
+  facet_wrap(~label, ncol=2 )
+
+ggsave("ATACseq_volcplots_allcontrasts_nrf1.pdf", plot = volc, width = 8, height = 12)
+volc
+```
+
+
+
+
+
+**Figs. Panel plots.** Please use the figures from the report.
+
+**Fig. Motif analysis.** Please use the motifs from the report.
+
+**Fig. PCA** Principal component analysis (components 1 and 2).
+
+```{r,fig.width=7,fig.height=6}
+pca <- readRDS("pca.rds")
+
+covar <- read.table("covariate_file.txt", header=TRUE)
+library(tidyverse)
+library(ggplot2)
+pcvar <- myfuncs::pca2var(pca)
+labpc1 <- sprintf("PC1 (%.0f%%)", 100 * pcvar[1])
+labpc2 <- sprintf("PC2 (%.0f%%)", 100 * pcvar[2])
+
+covar_pca <- cbind(covar, pca$x)
+theme_set(theme_bw())
+ggplot(covar_pca, aes(x=PC1, y=PC2, color=group, shape=treatment)) + geom_point() +
+	xlab(labpc1) + ylab(labpc2)
+dev.copy2pdf(file="principal_component_analysis.pdf")
+```
+
+
+```{r}
+.id <- "M41831"
+reactome <- tmod2tmodGS(tmod_dbs$msigdb_reactome$dbobj)
+cytoprot <- reactome[ .id ]
+.cid <- "JQ_inf_vs_DMSO_inf_ID6"
+```
+
+
+
+  
+**Fig.** Evidence plot for cytoprotection (Reactome gene set
+`r tmod_titles(cytoprot)`, ID `r tmod_ids(cytoprot)`).
+  
+```{r fig.width=8,fig.height=7}
+plot_evidence(pip, .id, "msigdb_reactome", .cid, contrast_obj=res[[.cid]],
+              tmod_dbs_obj = tmod_dbs, tmod_dbs_mapping_obj = tmod_map)
+  
+dev.copy2pdf(file="evidence_plot_cytoprotection.pdf")
+```
+
+
+```{r load_dylan_data,eval=FALSE}
+res_rseq <- list()
+res_rseq$dmso <- readRDS("../2020-12-15-Laqmani-Postmus-ATAC_Seq/dbinding_2021_01_23/dylan/res_infect_vs_mock_dmso.rds")
+res_rseq$jq1  <- readRDS("../2020-12-15-Laqmani-Postmus-ATAC_Seq/dbinding_2021_01_23/dylan/res_infect_vs_mock_jq1.rds")
+res_rseq$int  <- readRDS("../2020-12-15-Laqmani-Postmus-ATAC_Seq/dbinding_2021_01_23/dylan/res_interaction.rds")
+
+## XLSX files provided by Dylan
+## deg jq1 in infected -- jq1 infected vs dmso infected
+## deg jq1 in mock -- jq1 mock vs dmso mock
+## deg dmso vs naive -- dmso mock vs naive mock
+## deg infection in dmso -- dmso infected vs dmso uninfected
+## deg infection in jq1 -- jq1 infected vs jq1 uninfected
+## deg interaction jq1 infection -- interaction effect between jq1 treat and
+## infection
+
+res_rseq_files <- list.files("../2020-12-15-Laqmani-Postmus-ATAC_Seq/dbinding_2021_01_23/dylan_deg/", pattern=".xlsx")
+res_rseq_names <- gsub("deg_(.*)\\.xlsx", "\\1", res_rseq_files)
+names(res_rseq_files) <- res_rseq_names
+
+res_rseq <- map(res_rseq_files, ~ read_xlsx(file.path("../2020-12-15-Laqmani-Postmus-ATAC_Seq/dbinding_2021_01_23/", "dylan_deg", .), sheet=1))
+
+res_rseq <- res_rseq %>% map(~ .x %>% as.data.frame %>% mutate(PrimaryID=gene) %>% column_to_rownames("PrimaryID"))
+```
+
+
+
+```{r load_dylan_data_new}
+path <- "../2020-12-15-Laqmani-Postmus-ATAC_Seq/RNAseq_AllContrasts_DESEQres.rds"
+dpd <- readRDS(path)
+
+names(dpd)
+
+names(res)
+
+cntr_map <- c(
+"dmso.uninfect_naive.uninfect" = "uni_DMSO_vs_naive_ID0"      , 
+"dmso.infect_dmso.uninfect"    = "DMSO_inf_vs_uninf_ID1"     , 
+"jq1.uninfect_naive.uninfect"  = "JQ_uninf_vs_naive_ID2"      , 
+"jq1.infect_jq1.uninfect"      = "JQ_inf_vs_uninf_ID3"      ,
+"interact"                     = "interaction_ID4"            , 
+"jq1.uninfect_dmso.uninfect"   = "JQ_uninf_vs_DMSO_uninf_ID5", 
+"jq1.infect_dmso.infect"       = "JQ_inf_vs_DMSO_inf_ID6"    )
+
+
+names(dpd) <- cntr_map[ names(dpd) ]
+dpd <- dpd[ names(res) ]
+
+res_sel_sum <- map(res, ~ 
+                   merge(annot, .x, by.x="PrimaryID", by.y=0) %>%
+                   mutate(significant = !is.na(padj) & padj < 0.05) %>%
+                   group_by(ENSEMBL) %>% 
+                   summarise(nSignPeaks = sum(significant), nPeaks=n()) %>%
+                   mutate(ATAC=sprintf("%d/%d", nSignPeaks, nPeaks)) )
+
+gene_annot <- annot %>% filter(!duplicated(ENSEMBL)) %>% 
+  select(ENSEMBL, SYMBOL, ENTREZID)
+
+res_merged <- imap(res_sel_sum, ~ {
+                     res_dpd <- dpd[[ .y ]] %>% as.data.frame %>%
+                       select(log2FoldChange, pvalue, padj)
+                     .tmp <- merge(.x, res_dpd, by.x="ENSEMBL", by.y=0)
+                     merge(gene_annot, .tmp, by="ENSEMBL") %>%
+                       filter(nSignPeaks > 0 | padj < 0.05)
+                   })
+
+library(writexl)
+write_xlsx(res_merged, "genes_significant_in_atacseq_or_rnaseq_20220412.xlsx")
+```
+
+
+```{r load_cp}
+library(msigdbr)
+msig <- msigdbr(species="Homo sapiens")
+cprof <- get_object(pip, step="cluster_profiler", extension="rds")
+res_ann <- map(res, ~ merge(annot, .x, by.x="PrimaryID", by.y=0))
+```
+
+```{r calc_signs}
+
+sign_genes <- imap(cprof, ~ {
+                     .id <- .y
+
+  cpobj <- .x[[1]][[1]]
+  ids <- rownames(cpobj@result)
+
+  lfcsign <- map_lgl(set_names(ids), ~ {
+    genes <- cpobj@geneSets[[.x]]
+    selg <- res_ann[[.id]]$log2FoldChange[ res_ann[[.id]]$ENTREZID %in% genes ]
+    sum(selg > 0) > 0.5 * length(selg)
+  })
+  list(cpobj=cpobj, lfcsign=lfcsign)
+
+})
+
+```
+
+
+
+
+```{r results="asis",eval=TRUE}
+template <- '
+
+\\newpage
+
+
+\n```{r}
+
+cpobj <- sign_genes[[.id]][["cpobj"]]
+lfcsign <- sign_genes[[.id]][["lfcsign"]]
+
+sel_up   <- which(with(cpobj@result, NES > 0 & p.adjust < 0.05))
+sel_down <- which(with(cpobj@result, NES < 0 & p.adjust < 0.05))
+
+plotlist <- list()
+if(sum(sel_up) > 0) {
+  tmp <- cpobj
+  tmp@result <- cpobj[ sel_up ]
+  plotlist$up <- dotplot(tmp, showCategory=50) + ggtitle("Log 2 fold change > 0")
+}
+
+if(sum(sel_down) > 0) {
+  tmp <- cpobj
+  tmp@result <- cpobj[ sel_down ]
+  plotlist$down <- dotplot(tmp, showCategory=50) + ggtitle("Log 2 fold change < 0")
+}
+
+
+\n```
+
+
+
+
+**Fig. Cluster profiler results separate by up- and down-regulated gene
+sets.**
+Contrast `r .id`,
+database `r .dbid`,
+subcategory `r .catid`.
+
+\n```{r fig.width=16,fig.height=6, eval=TRUE}
+if(length(plotlist) > 0) {
+  plot_grid(plotlist=plotlist)
+} else {
+	message("No results")
+  cat("\n\n**No results at p < 0.05**\n\n")
+  return("\n\n**No results at p < 0.05**\n\n")
+}
+
+\n```
+
+
+'
+
+for(.id in names(res)) {
+  for(.dbid in names(cprof[[.id]])) {
+    for(.catid in names(cprof[[.id]][[.dbid]])) {
+      cat(knitr::knit_child(text=template, quiet=TRUE))
+        cat("\n\n")
+    }
+  }
+}
+
+```
+
+\newpage
+
+**Fig.** Cluster profiler results, alternate visualization
+
+```{r fig.width=16,fig.height=8}
+ctrid <- "DMSO_inf_vs_uninf_ID1"
+dbid  <- "GO"
+catid <- "BP"
+
+max_padj    <- 0.01
+minimum_NES <- 1
+num_topPways <- 20
+
+ctr_sel <- c("DMSO_inf_vs_uninf", "JQ_uninf_vs_DMSO_uninf", "JQ_inf_vs_DMSO_inf", "JQ_inf_vs_uninf")
+
+go_paths <- imap_dfr(cprof, ~ 
+                    .x[[dbid]][[catid]]@result %>% mutate(Contrast = .y)) %>%
+  mutate(Count=str_count(core_enrichment, "/") + 1) %>%
+  mutate(Peak_Ratio = Count / setSize) %>%
+  mutate(Contrast = gsub("_ID[0-9]+$", "", Contrast)) %>%
+  filter(Contrast %in% ctr_sel) %>%
+  mutate(Contrast = factor(Contrast, levels = ctr_sel))
+
+
+combo_plot <- function(x, up=TRUE, max_padj=.01, minimum_NES=1, num_topPways=20) {
+
+  if(up) {
+    ids <- x %>% filter(p.adjust < max_padj & NES > minimum_NES) %>%
+      group_by(Contrast) %>% arrange(desc(NES)) %>%
+      slice_head(n = num_topPways) %>% 
+      pull(Description) %>% unique()
+  } else {
+    ids <- x %>% filter(p.adjust < max_padj & NES < -minimum_NES) %>%
+      group_by(Contrast) %>% arrange(desc(NES)) %>%
+      slice_head(n = num_topPways) %>% 
+      pull(Description) %>% unique()
+  }
+
+  mat <- x %>% select(Description, NES, Contrast) %>%
+    filter(Description %in% ids) %>%
+    pivot_wider(names_from=Contrast, values_from=NES) %>% 
+    column_to_rownames(var = "Description") %>%
+    scale()
+
+  mat[is.na(mat)] <- 0
+  clust <- hclust(dist(mat))
+  label_order <- rownames(mat)[ clust$order ]
+
+  df <- x %>% filter(Description %in% ids) %>% 
+    mutate(Description = factor(Description, levels=label_order)) %>%
+    mutate(Significance = ifelse(p.adjust < 0.05, "Significant", "NS")) %>%
+    mutate(Significance = factor(Significance, levels=c("Significant", "NS")))
+
+  ggplot(df, aes(Contrast, Description, color=Significance, size=Peak_Ratio, fill=NES)) +
+         geom_point(stroke=1, shape=21) +
+         scale_fill_gradient(low='#0000FF',high='#FFFF00', limits=c(-3, 3))+
+         theme_bw() +
+         theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))+
+    scale_x_discrete(drop=FALSE) +
+    scale_color_manual(values=c("red", "black"), name="Significance")
+}
+
+plot_up <- combo_plot(go_paths, up=TRUE)
+ggsave(filename="ATACseq_GO_enrichment_UP.pdf", plot=plot_up, width=8, height=10.5)
+plot_dw <- combo_plot(go_paths, up=FALSE)
+ggsave(filename="ATACseq_GO_enrichment_DOWN.pdf", plot=plot_dw, width=8, height=5)
+
+plot_grid(plot_up, plot_dw)
+   
+
+```
+
+
+
+
+
+```{r save_clprof_res}
+file <- "cluster_profiler_results.xlsx"
+
+cp_res <- unlist(map(cprof, ~ 
+              unlist(map(.x, ~
+                         map(.x, ~ 
+                                    .x@result), ),
+                     recursive=FALSE)),
+                 recursive=FALSE)
+
+write_xlsx(cp_res, path=file)
+```
+
+
+\newpage
+
+**Fig.** Distribution of higly occupied fragments (average number of reads > 
+`r min_counts <- 100; min_counts`) by sample group.
+
+
+```{r}
+cnt   <- counts(ds)
+stopifnot(all(colnames(cnt) == covar$label))
+sel_groups <- c(
+"naive_uninfected",
+"JQ1_uninfected",
+"JQ1_infected",
+"DMSO_uninfected",
+"DMSO_infected")
+
+
+df <- map_dfr(sel_groups, ~ {
+  .cnt <- cnt[ , covar$treatment_group %in% .x ]
+  res <- data.frame(group=.x, PrimaryID=rownames(.cnt), meanExpr=rowMeans(.cnt))
+  res <- res %>% filter(meanExpr > min_counts)
+  res
+})
+
+df <- merge(df, annot, by="PrimaryID") %>%
+  mutate(group=gsub("_", " ", group)) %>%
+  mutate(group=gsub("JQ1", "JQ-1", group))
+
+ggplot(df %>% filter(abs(distanceToTSS) < 1500), 
+	aes(x=distanceToTSS, color=group)) + geom_density(adjust=16) +
+  xlim(-500, 500)
+dev.copy2pdf(file="distribution_highly_occupied_fragments.pdf")
+```
+
+
+\newpage
+
+
+
+**Fig.** Distribution of highly occupied fragments (average number of reads >
+`r min_counts`) by sample group.
+
+```{r}
+p <- df %>% group_by(group) %>% 
+	mutate(n=n()) %>%
+	mutate(Feature=gsub("(Exon|Intron|Downstream) .*", "\\1", annotation))  %>% 
+	group_by(group, Feature) %>% 
+	summarise(Frequency=n()/n[1]) %>% 
+	tidyr::drop_na() %>%
+  mutate(Feature = factor(Feature, 
+		levels=rev(c("Promoter (2-3kb)", "Promoter (1-2kb)", "Promoter (<=1kb)", "5' UTR", "Exon",
+              "Intron", "3' UTR", "Downstream", "Distal Intergenic")))) %>%
+  mutate(group=gsub("_", " ", group)) %>%
+  mutate(group=gsub("JQ1", "JQ-1", group))
+  
+
+
+ggplot(p, aes(x="", y=Frequency*100, fill=Feature)) +
+  geom_bar(stat="identity") + 
+	facet_wrap(vars(group), ncol=1) +
+	coord_flip() + 
+	ylab("Percentage (%)") + 
+	xlab("") + 
+	theme_bw() +
+  scale_fill_viridis_d(guide=guide_legend(rev=TRUE))
+dev.copy2pdf(file="distribution_highly_occupied_fragments_2.pdf")
+```
+
+
+\newpage
+
+
+**Table.**
+Distribution of highly occupied fragments (average number of reads >
+`r min_counts`) by sample group. Values are percentages of peaks assigned
+to the given region.
+
+```{r results="markdown"}
+p %>%
+  mutate(Frequency = 100 * Frequency) %>%
+  pivot_wider(names_from = "group", id_cols="Feature",
+              values_from="Frequency") %>%
+  mutate(across(where(is.numeric), ~ format(., digits = 1))) %>%
+  pander(split.tables=Inf)
+```
+
+
+
+\newpage
+
+
+
+
+**Table.** Number of peaks significant at FDR < 0.05 in each contrast.
+
+```{r results="markdown"}
+library(pander)
+.tab <- imap_dfr(res, ~ {
+	.cntr <- .y
+	.x %>% filter(padj < 0.05) %>%
+		summarise(
+			Contrast=.cntr,
+			Up = sum(log2FoldChange > 0), 
+			Down = sum(log2FoldChange < 0), 
+			Total = n())
+})
+
+.tab %>% pander()
+```
+
+
+
+
+
+
+
+

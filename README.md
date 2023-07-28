@@ -14,6 +14,8 @@ Unix/BASH and R scripts are deposited in a directory structure that reflects the
 
 ### ATACseq
 
+See [ATAC-seq analysis README file](ATACseq)
+
 ## REFERENCE GENOME
 
 The analysis for the RNAseq reads was performed by aligning the reads to a combined human/SARS-CoV-2 genome. To create this reference, the SARS-CoV-2 genome (GenBank entry MN908947) was appended to the human genome assembly h38 (ENSEMBL v102), i.e. both the FASTA and GTF files were merged. The SARS-CoV-2 FASTA and GTF files are included in the folder "0_ReferenceAlignment_FeatureCount". 
