@@ -1,0 +1,16 @@
+,treat,infection
+dmso_infect_1,dmso,infect
+dmso_infect_2,dmso,infect
+dmso_infect_3,dmso,infect
+dmso_mock_1,dmso,mock
+dmso_mock_2,dmso,mock
+dmso_mock_3,dmso,mock
+jq1_infect_1,jq1,infect
+jq1_infect_2,jq1,infect
+jq1_infect_3,jq1,infect
+jq1_mock_1,jq1,mock
+jq1_mock_2,jq1,mock
+jq1_mock_3,jq1,mock
+naive_mock_1,naive,mock
+naive_mock_2,naive,mock
+naive_mock_3,naive,mock
